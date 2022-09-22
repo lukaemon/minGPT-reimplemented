@@ -107,9 +107,11 @@ class Trainer:
         logits: (b, t, vocab_size)
         y: (b, t), index of vocab_size embedding, wte
         """
+        # (b * t, vocab_size), (b * t), which fits cross_entropy signature
+        # take the logits of last token as prob to predict next token
         loss = F.cross_entropy(
             logits.view(-1, logits.size(-1)), y.view(-1), ignore_index=-1  # ref 6
-        )  # (b * t, vocab_size), (b * t), which fits cross_entropy signature
+        )
 
         return loss
 
