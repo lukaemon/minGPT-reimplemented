@@ -28,7 +28,7 @@ class Attention(nn.Module):
             kernel_init=nn.initializers.normal(stddev=0.02) # bias init default zeros
             )(x).split(3, axis=-1) # then split
         
-        # multi-head, hc: head channel
+        # multi-head split, hc: head channel
         q, k, v = tree_map(
             lambda x: x.reshape(b, t, self.config.n_head, c // self.config.n_head).transpose((0, 2, 1, 3)),
             qkv,
@@ -38,16 +38,16 @@ class Attention(nn.Module):
 
         # apply causal mask
         mask = jnp.tril(jnp.ones((t, t)))
-        neg_inf = jnp.ones((t, t)) * -jnp.inf
-        att = jnp.where(mask==0, neg_inf, att)
+        att = jnp.where(mask==0, -jnp.inf, att)
 
+        # compute weights
         att = nn.softmax(att, axis=-1)
-
         att = nn.Dropout(self.config.attn_pdrop)(att, deterministic=not training)
 
+        # weighted sum
         output = att @ v  # (b,h,t,hc)
 
-        # (b,t,h,hc) -> (b,t,c)
+        # multihead concat, (b,t,h,hc) -> (b,t,c)
         output = output.transpose((0, 2, 1, 3)).reshape(b, t, c)
 
         # output dense layer
