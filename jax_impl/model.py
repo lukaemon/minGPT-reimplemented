@@ -15,27 +15,32 @@ from general.utils import ModelConfig
 
 
 class Attention(nn.Module):
+    '''multihead causal self-attention'''
     config: ModelConfig
 
     @nn.compact
     def __call__(self, x, training=True):
         b, t, c = x.shape
 
-        # [q, k, v]
+        # [q, k, v], each (b,t,n_embd), pool qkv transform as one huge linear transform
         qkv = nn.Dense(
-            features=3 * self.config.n_embd, 
+            features=3 * self.config.n_embd, # hence 3xn_embd output
             kernel_init=nn.initializers.normal(stddev=0.02) # bias init default zeros
-            )(x).split(3, axis=-1)
-        qkv = tree_map(
+            )(x).split(3, axis=-1) # then split
+        
+        # multi-head, hc: head channel
+        q, k, v = tree_map(
             lambda x: x.reshape(b, t, self.config.n_head, c // self.config.n_head).transpose((0, 2, 1, 3)),
             qkv,
-        )
+        ) # (b,h,t,hc)
 
-        q, k, v = qkv  # (b,h,t,hc)
         att = q @ k.transpose(0, 1, 3, 2) / math.sqrt(c)  # (b,h,t,t)
 
-        mask = self.full_causal_mask[:t, :t]  # (t, t)
-        att = att + mask  # +0 or +-inf
+        # apply causal mask
+        mask = jnp.tril(jnp.ones((t, t)))
+        neg_inf = jnp.ones((t, t)) * -jnp.inf
+        att = jnp.where(mask==0, neg_inf, att)
+
         att = nn.softmax(att, axis=-1)
 
         att = nn.Dropout(self.config.attn_pdrop)(att, deterministic=not training)
@@ -45,6 +50,7 @@ class Attention(nn.Module):
         # (b,t,h,hc) -> (b,t,c)
         output = output.transpose((0, 2, 1, 3)).reshape(b, t, c)
 
+        # output dense layer
         output = nn.Dense(  # ref 3
             self.config.n_embd, 
             kernel_init=nn.initializers.normal(stddev=0.02 / math.sqrt(2 * self.config.n_layer))
@@ -52,22 +58,15 @@ class Attention(nn.Module):
 
         return output
 
-    @functools.cached_property
-    def full_causal_mask(self):
-        cw = self.config.context_window
-        mask = np.triu(np.ones((cw, cw)), k=1)  # where the -inf should be
-        mask[mask == 1] = -np.inf
-
-        return mask
-
 
 class Block(nn.Module):
+    '''encoder block'''
     config: ModelConfig
 
     @nn.compact
     def __call__(self, x, training=True):
         attn_out = nn.LayerNorm()(x)
-        attn_out = x + Attention(self.config)(attn_out)
+        attn_out = x + Attention(self.config)(attn_out, training)
 
         mlp = [
             nn.Dense(4 * self.config.n_embd, kernel_init=nn.initializers.normal(stddev=0.02)),
@@ -85,6 +84,7 @@ class Block(nn.Module):
 
 
 class Embedding(nn.Module):
+    '''position and token embedding'''
     config: ModelConfig
 
     @nn.compact
@@ -128,6 +128,7 @@ class GPT(nn.Module):
 
         x = nn.LayerNorm()(x)
 
+        # output head
         logits = nn.Dense(self.config.vocab_size)(x)
 
         return logits
