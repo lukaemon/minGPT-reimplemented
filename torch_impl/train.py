@@ -7,8 +7,8 @@ import torch.nn.functional as F
 from torch.utils.data.dataset import Dataset
 from torch.utils.data.dataloader import DataLoader
 
-from utils import TrainConfig, TrainerCallbackEvent
-from model import GPT
+from general.utils import TrainConfig, TrainerCallbackEvent
+from torch_impl.model import GPT
 
 
 class Trainer:
