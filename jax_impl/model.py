@@ -1,20 +1,17 @@
 import math
+from ml_collections import ConfigDict
 
-import jax
 import jax.numpy as jnp
 from jax.tree_util import tree_map
 
-import flax
 import flax.linen as nn
 
 import numpy as np
 
-from torch_impl.utils import ModelConfig
-
 
 class Attention(nn.Module):
     '''multihead causal self-attention'''
-    config: ModelConfig
+    cfg: ConfigDict
 
     @nn.compact
     def __call__(self, x, training=True):
@@ -22,13 +19,13 @@ class Attention(nn.Module):
 
         # [q, k, v], each (b,t,n_embd), pool qkv transform as one huge linear transform
         qkv = nn.Dense(
-            features=3 * self.config.n_embd, # hence 3xn_embd output
+            features=3 * self.cfg.n_embd, # hence 3xn_embd output
             kernel_init=nn.initializers.normal(stddev=0.02) # bias init default zeros
             )(x).split(3, axis=-1) # then split
         
         # multi-head split, hc: head channel
         q, k, v = tree_map(
-            lambda x: x.reshape(b, t, self.config.n_head, c // self.config.n_head).transpose((0, 2, 1, 3)),
+            lambda x: x.reshape(b, t, self.cfg.n_head, c // self.cfg.n_head).transpose((0, 2, 1, 3)),
             qkv,
         ) # (b,h,t,hc)
 
@@ -40,7 +37,7 @@ class Attention(nn.Module):
 
         # compute weights
         att = nn.softmax(att, axis=-1)
-        att = nn.Dropout(self.config.attn_pdrop)(att, deterministic=not training)
+        att = nn.Dropout(self.cfg.dropout_prob)(att, deterministic=not training)
 
         # weighted sum
         output = att @ v  # (b,h,t,hc)
@@ -50,8 +47,8 @@ class Attention(nn.Module):
 
         # output dense layer
         output = nn.Dense(  # ref 3
-            self.config.n_embd, 
-            kernel_init=nn.initializers.normal(stddev=0.02 / math.sqrt(2 * self.config.n_layer))
+            self.cfg.n_embd, 
+            kernel_init=nn.initializers.normal(stddev=0.02 / math.sqrt(2 * self.cfg.n_layer))
             )(output)
 
         return output
@@ -59,19 +56,19 @@ class Attention(nn.Module):
 
 class Block(nn.Module):
     '''encoder block'''
-    config: ModelConfig
+    cfg: ConfigDict
 
     @nn.compact
     def __call__(self, x, training=True):
 
         # residual link
-        output = x + Attention(self.config)(nn.LayerNorm()(x), training)
+        output = x + Attention(self.cfg)(nn.LayerNorm()(x), training)
 
         mlp = nn.Sequential([
-            nn.Dense(4 * self.config.n_embd, kernel_init=nn.initializers.normal(stddev=0.02)),
+            nn.Dense(4 * self.cfg.n_embd, kernel_init=nn.initializers.normal(stddev=0.02)),
             nn.gelu,
-            nn.Dense(self.config.n_embd, kernel_init=nn.initializers.normal(stddev=0.02 / math.sqrt(2 * self.config.n_layer))),  # ref 3
-            nn.Dropout(self.config.recid_pdrop, deterministic=not training),
+            nn.Dense(self.cfg.n_embd, kernel_init=nn.initializers.normal(stddev=0.02 / math.sqrt(2 * self.cfg.n_layer))),  # ref 3
+            nn.Dropout(self.cfg.dropout_prob, deterministic=not training),
         ])
 
         # resi link
@@ -82,7 +79,7 @@ class Block(nn.Module):
 
 class Embedding(nn.Module):
     '''position and token embedding'''
-    config: ModelConfig
+    cfg: ConfigDict
 
     @nn.compact
     def __call__(self, idx, training=True):
@@ -90,8 +87,8 @@ class Embedding(nn.Module):
         b, t = idx.shape
 
         position_embedding = nn.Embed(
-            self.config.context_window, 
-            self.config.n_embd,
+            self.cfg.context_window, 
+            self.cfg.n_embd,
             embedding_init=nn.initializers.normal(stddev=0.02)
             )
 
@@ -99,13 +96,13 @@ class Embedding(nn.Module):
         wpe = position_embedding(jnp.arange(t))[None,]
 
         token_embedding = nn.Embed(
-            self.config.vocab_size, 
-            self.config.n_embd,
+            self.cfg.vocab_size, 
+            self.cfg.n_embd,
             embedding_init=nn.initializers.normal(stddev=0.02)
             )
         wte = token_embedding(idx)  # (b, t, n_embd)
 
-        output = nn.Dropout(self.config.embd_pdrop)(
+        output = nn.Dropout(self.cfg.dropout_prob)(
             wpe + wte, 
             deterministic=not training
         )
@@ -114,19 +111,19 @@ class Embedding(nn.Module):
 
 
 class GPT(nn.Module):
-    config: ModelConfig
+    cfg: ConfigDict
 
     @nn.compact
     def __call__(self, x, training=True):
-        x = Embedding(self.config)(x, training)
+        x = Embedding(self.cfg)(x, training)
 
-        for _ in range(self.config.n_layer):
-            x = Block(self.config)(x, training)
+        for _ in range(self.cfg.n_layer):
+            x = Block(self.cfg)(x, training)
 
         x = nn.LayerNorm()(x)
 
         # output head
-        logits = nn.Dense(self.config.vocab_size)(x)
+        logits = nn.Dense(self.cfg.vocab_size)(x)
 
         return logits
 
