@@ -1,9 +1,7 @@
 import math
-import functools
 
 import jax
 import jax.numpy as jnp
-from jax import random
 from jax.tree_util import tree_map
 
 import flax
@@ -11,7 +9,7 @@ import flax.linen as nn
 
 import numpy as np
 
-from general.utils import ModelConfig
+from torch_impl.utils import ModelConfig
 
 
 class Attention(nn.Module):
@@ -65,20 +63,19 @@ class Block(nn.Module):
 
     @nn.compact
     def __call__(self, x, training=True):
-        attn_out = nn.LayerNorm()(x)
-        attn_out = x + Attention(self.config)(attn_out, training)
 
-        mlp = [
+        # residual link
+        output = x + Attention(self.config)(nn.LayerNorm()(x), training)
+
+        mlp = nn.Sequential([
             nn.Dense(4 * self.config.n_embd, kernel_init=nn.initializers.normal(stddev=0.02)),
             nn.gelu,
             nn.Dense(self.config.n_embd, kernel_init=nn.initializers.normal(stddev=0.02 / math.sqrt(2 * self.config.n_layer))),  # ref 3
             nn.Dropout(self.config.recid_pdrop, deterministic=not training),
-        ]
+        ])
 
-        mlp_out = nn.LayerNorm()(attn_out)
-        for fn in mlp:
-            mlp_out = fn(mlp_out)
-        output = attn_out + mlp_out
+        # resi link
+        output = output + mlp(nn.LayerNorm()(output))
 
         return output
 

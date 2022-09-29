@@ -13,11 +13,12 @@ class SortDataset(Dataset):
     where I is "ignore", as the transformer is reading the input sequence
     """
 
-    def __init__(self, split, length=6, num_digits=3):
+    def __init__(self, split, length=6, num_digits=3, transform=None):
         assert split in {"train", "test"}
         self.split = split
         self.length = length
         self.num_digits = num_digits
+        self.transform = transform
 
     def __len__(self):
         return 10000  # ...
@@ -63,6 +64,10 @@ class SortDataset(Dataset):
         y = cat[1:].clone()
         # we only want to predict at output locations, mask out the loss at the input locations
         y[: self.length - 1] = -1
+        
+        if self.transform:
+            x, y = self.transform(x), self.transform(y)
+            
         return x, y
 
     @property

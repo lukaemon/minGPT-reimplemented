@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Tuple
 from enum import Enum
 
+from flax import struct
 
 def set_seed(seed):
     random.seed(seed)
@@ -25,6 +26,7 @@ class ModelConfig:
     attn_pdrop: float = 0.1
     recid_pdrop: float = 0.1
     embd_pdrop: float = 0.1
+    
 
     def __post_init__(self):
         self.config_set = {
@@ -68,6 +70,7 @@ class TrainConfig:
     # dataloader
     num_workers: int = 0
     batch_size: int = 64
+    sequence_len: int = 6
 
     # training
     max_iters: int = None

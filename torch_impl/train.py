@@ -7,7 +7,7 @@ import torch.nn.functional as F
 from torch.utils.data.dataset import Dataset
 from torch.utils.data.dataloader import DataLoader
 
-from general.utils import TrainConfig, TrainerCallbackEvent
+from torch_impl.utils import TrainConfig, TrainerCallbackEvent
 from torch_impl.model import GPT
 
 
@@ -108,7 +108,6 @@ class Trainer:
         y: (b, t), index of vocab_size embedding, wte
         """
         # (b * t, vocab_size), (b * t), which fits cross_entropy signature
-        # take the logits of last token as prob to predict next token
         loss = F.cross_entropy(
             logits.view(-1, logits.size(-1)), y.view(-1), ignore_index=-1  # ref 6
         )
@@ -146,7 +145,6 @@ class Trainer:
 
         loader = self.train_loader if split == "train" else self.test_loader
         n = loader.dataset.sequence_length
-        show_mistakes_max = 5
 
         result = []
 

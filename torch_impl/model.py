@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from general.utils import ModelConfig
+from torch_impl.utils import ModelConfig
 
 
 class CausalMultiheadAttention(nn.Module):
