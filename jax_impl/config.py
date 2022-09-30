@@ -33,6 +33,7 @@ class Config:
     sequence_len: int = 6 # used to init dataset
     
     # train config
-    batch_size: int  = 32
+    batch_size: int  = 64
     learning_rate: float = 5e-4
-    max_iter: int = 2000
+    n_epoch = 16
+    weight_decay = 0.1
