@@ -1,8 +1,11 @@
+from functools import partial
 import jax
 from jax import tree_util
 
 import jax.numpy as jnp
 import flax.linen as nn
+
+import numpy as np
 
 import optax
 from flax.training import train_state
@@ -10,14 +13,17 @@ from flax.training import train_state
 from jax_impl.model import GPT
 from jax_impl.config import Config
 
+from dataset import SortDataset
+from torch.utils.data import DataLoader
+
 # raw input, get the sense of -1 paddings
 # and the reason for crazy pre normalizing to ignore loss of padding positions
 # [0 2 5 3 3 1 0 1 2 3 3]
 # [-1 -1 -1 -1 -1  0  1  2  3  3  5]
-def loss_fn(logits, labels, ignore_index=-1):
+def loss_fn(logits, labels, ignore_index=-1):  # ref 2, omg, price for jit
     logits = jnp.where(
         (labels == ignore_index)[..., None], -nn.log_softmax(logits), logits
-    )  # ref 2, omg, price for jit
+    )
     loss = optax.softmax_cross_entropy_with_integer_labels(logits, labels)  # ref 1
 
     # batch average loss, torch cross entropy loss default redution is mean as well
@@ -29,6 +35,17 @@ def loss_fn(logits, labels, ignore_index=-1):
 # logits = logits[filter]
 # NonConcreteBooleanIndexError: Array boolean indices must be concrete; got ShapedArray(bool[32,11])
 # See https://jax.readthedocs.io/en/latest/errors.html#jax.errors.NonConcreteBooleanIndexError
+
+# When I do this jax.lax.stop_gradient(-nn.log_softmax(logits))
+# result: epoch 11 - iter:100 | loss:1.877 | acc:0.990
+# this is not the right number because cross entropy here is -log(pred_prob)
+# check the graph to get a sense: https://www.wolframalpha.com/input?i=-log%28x%29+from+0+to+1
+# meaning, at acc 0.99, my loss should be almost 0, not 1.877.
+# if I take off the stop_gradient
+# result: epoch 11 - iter:100 | loss:0.010 | acc:0.992
+# this is within expectation.
+# TODO: but why? I did this -logsoftmax as a hack to counter index -1. What's the proper way to handle this?
+# maybe pytorch implementation could give me a hint: https://pytorch.org/docs/stable/_modules/torch/nn/modules/loss.html#CrossEntropyLoss
 
 
 def create_weight_decay_mask(params):  # FIXME: You can do better, this is crazy
@@ -108,32 +125,97 @@ def create_train_state(rng, cfg: Config):
         apply_fn=model.apply, params=params, tx=optimizer
     )
 
-# all bets are on being able to jax.jit this, otherwise, what's the purpose of using JAX
+
+def compute_loss(params, batch, cfg, dropout_rng):
+    x, y = batch
+    logits = GPT(cfg).apply(params, x, rngs={"dropout": dropout_rng})
+    loss = loss_fn(logits, y, ignore_index=-1)
+
+    return loss, logits
+
+
+def compute_accuracy(logits, labels):
+    pred = jnp.argmax(logits, axis=-1)
+
+    # still need to take care of -1 cas
+    acc = (pred == labels).mean(where=labels != -1)
+
+    return acc
+
+
+@partial(jax.jit, static_argnames="cfg", donate_argnums=(0,)) # 260ms -> 1ms
 def train_step(state: train_state.TrainState, batch, cfg: Config, dropout_rng):
-    def compute_loss(params):
-        x, y = batch
-        logits = GPT(cfg).apply(params, x, rngs={"dropout": dropout_rng})
-        loss = loss_fn(logits, y, ignore_index=-1)
-
-        return loss, logits
-
-    def compute_accuracy(logits, labels):
-        pred = jnp.argmax(logits, axis=-1)
-
-        # still need to take care of -1 cas
-        acc = (pred == labels).mean(where=labels != -1)
-
-        return acc
-
     _, labels = batch
 
     grad_fn = jax.value_and_grad(compute_loss, has_aux=True)
-    (loss, logits), grads = grad_fn(state.params)
+    (loss, logits), grads = grad_fn(state.params, batch, cfg, dropout_rng)
 
     state = state.apply_gradients(grads=grads)
     metrics = {"loss": loss, "acc": compute_accuracy(logits, labels)}
 
     return state, metrics
+
+
+def prepare_data(cfg: Config):
+    def numpy_collate(batch):
+        if isinstance(batch[0], np.ndarray):
+            return np.stack(batch)
+        elif isinstance(batch[0], (tuple, list)):
+            transposed = zip(*batch)
+            return [numpy_collate(samples) for samples in transposed]
+        else:
+            return np.array(batch)
+
+    def cast(x):
+        return np.array(x, dtype=int)
+
+    train_dataset = SortDataset(
+        "train", length=cfg.sequence_len, num_digits=cfg.vocab_size, transform=cast
+    )
+    train_loader = DataLoader(
+        train_dataset, batch_size=cfg.batch_size, shuffle=True, collate_fn=numpy_collate
+    )
+
+    eval_dataset = SortDataset(
+        "test", length=cfg.sequence_len, num_digits=cfg.vocab_size, transform=cast
+    )
+    eval_loader = DataLoader(
+        eval_dataset, batch_size=cfg.batch_size, collate_fn=numpy_collate
+    )
+
+    return train_loader, eval_loader
+
+
+def train_epoch(state, train_loader, cfg, dropout_rng, epoch):
+    loss, acc = [], []
+
+    for batch in train_loader:
+        state, metrics = train_step(state, batch, cfg, dropout_rng)
+
+        loss.append(metrics["loss"])
+        acc.append(metrics["acc"])
+
+    avg_loss = jnp.array(loss).mean().item()
+    avg_acc = jnp.array(acc).mean().item()
+
+    print(f"epoch {epoch:2d} | {avg_loss=:.4f} | {avg_acc=:.4f}")
+
+    return state
+
+
+def eval(state, eval_loader, cfg):
+    batch_acc = []
+    
+    # with out static_argnames, error: https://jax.readthedocs.io/en/latest/errors.html#jax.errors.ConcretizationTypeError
+    infer_fn = jax.jit(GPT(cfg).apply, static_argnames='training')  # 17s to 1.62s
+    
+    for x, y in eval_loader:
+        logits = infer_fn(state.params, x, training=False)
+        acc = compute_accuracy(logits, y)
+        batch_acc.append(acc)
+    
+    overall_acc = jnp.array(batch_acc).mean()
+    print(f"eval accuracy = {overall_acc:.3f}")
 
 
 # reference

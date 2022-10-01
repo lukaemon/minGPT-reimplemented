@@ -17,7 +17,7 @@ class Config:
     # train config
     batch_size: int  = 64
     learning_rate: float = 5e-4
-    n_epoch = 12
+    n_epoch = 32
     
     # optimizer
     b1 = 0.9
