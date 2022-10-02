@@ -1,17 +1,15 @@
 import math
-from ml_collections import ConfigDict
 
 import jax.numpy as jnp
 from jax.tree_util import tree_map
 
 import flax.linen as nn
 
-import numpy as np
-
+from jax_impl.config import Config
 
 class Attention(nn.Module):
     '''multihead causal self-attention'''
-    cfg: ConfigDict
+    cfg: Config
 
     @nn.compact
     def __call__(self, x, training=True):
@@ -56,7 +54,7 @@ class Attention(nn.Module):
 
 class Block(nn.Module):
     '''encoder block'''
-    cfg: ConfigDict
+    cfg: Config
 
     @nn.compact
     def __call__(self, x, training=True):
@@ -79,7 +77,7 @@ class Block(nn.Module):
 
 class Embedding(nn.Module):
     '''position and token embedding'''
-    cfg: ConfigDict
+    cfg: Config
 
     @nn.compact
     def __call__(self, idx, training=True):
@@ -111,7 +109,7 @@ class Embedding(nn.Module):
 
 
 class GPT(nn.Module):
-    cfg: ConfigDict
+    cfg: Config
 
     @nn.compact
     def __call__(self, x, training=True):

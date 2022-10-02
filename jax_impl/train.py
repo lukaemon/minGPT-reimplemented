@@ -215,7 +215,7 @@ def eval(state, eval_loader, cfg):
         batch_acc.append(acc)
     
     overall_acc = jnp.array(batch_acc).mean()
-    print(f"eval accuracy = {overall_acc:.3f}")
+    return overall_acc 
 
 
 # reference
