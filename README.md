@@ -45,12 +45,40 @@ Coding up model from a paper is an interesting, yet tiny step of the full stack.
 
 # Cooking log
 ## 20221002
-JAX version is working. However, my inference speed after JIT is still slow.  
-I don't know if that's normal for autoregressive inference, or I didn't JIT it right. Assuming my ignorance is playing me. 
-
-Experiment with various dataset complexity. 
+### Experiment with various dataset complexity. 
 - `gpt-nano` setup 32 epoch works until vocab_size and seq_len = 32
 - `gpt-mini` setup, 96 epoch works for vocab, seq_len = 64. Train longer... Stopped here, training time is growing exponentially.
+
+### Inference problem
+- JAX version is working. However, my inference speed after JIT is still slow. I don't know if that's normal for autoregressive inference, or I didn't JIT it right. Assuming my ignorance is playing me.  
+- Found the ignorance =.=, this is my inference code. I thought the JITed forward pass would give me performance boost. However this code took me ~1min to generate 64 tokens.
+```python
+def generate(cfg: Config, params, x, num_token):
+    """greedy argmax
+    x: (b, t)
+    num_token: how many new token to generate
+    """
+    context = x
+
+    infer_fn = jax.jit(partial(GPT(cfg).apply, params, training=False))
+
+    for _ in range(num_token):
+        # sliding window when the sequence is longer than context_window
+        # context's max shape is (b, context_window)
+        context = context[:, -cfg.context_window :]
+        logits = infer_fn(context)
+
+        # take the last token's logits, make the prediction, and adjust shape for next cat op
+        pred = jnp.argmax(logits[:, -1, :], axis=-1)[..., None]  # (b, 1)
+
+        context = jnp.concatenate([context, pred], axis=1)  # (b, t+1)
+
+    return context
+```
+- The problem is the growing context: `context = jnp.concatenate([context, pred], axis=1)  # (b, t+1)` Meaning, whenever I call the `infer_fn`, the input shape is different, and the function is reJITed. This is even worse than non-JIT version. The process is running on CPU. Remove the `jax.jit` is 10% faster.
+
+
+
 
 ## 20220921
 First error free training and evaluation. But my loss is way higher than Andrej's. The party begins. Have to find out hidden bugs that didn't crush the runtime but eating away performance in the dark. The beauty of ML alchemy.
