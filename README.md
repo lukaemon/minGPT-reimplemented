@@ -33,6 +33,15 @@ Coding up model from a paper is an interesting, yet tiny step of the full stack.
 - The callback system is intuitive and interesting.
 
 # Cooking log
+## 20221002
+JAX version is working. However, my inference speed after JIT is still slow.  
+I don't know if that's normal for autoregressive inference, or I didn't JIT it right. Assuming my ignorance is playing me. 
+
+Experiment with various dataset complexity. 
+- `gpt-nano` setup 32 epoch works until vocab_size and seq_len = 32
+- `gpt-mini` setup, 96 epoch works for vocab, seq_len = 64. Train longer...
+- Stop here, training time is growing exponentially.
+
 ## 20220921
 First error free training and evaluation. But my loss is way higher than Andrej's. The party begins. Have to find out hidden bugs that didn't crush the runtime but eating away performance in the dark. The beauty of ML alchemy.
 

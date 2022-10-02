@@ -143,7 +143,7 @@ def compute_accuracy(logits, labels):
     return acc
 
 
-@partial(jax.jit, static_argnames="cfg", donate_argnums=(0,)) # 260ms -> 1ms
+@partial(jax.jit, static_argnames="cfg", donate_argnums=(0,)) # 260ms -> 1ms at gpt-nano setup
 def train_step(state: train_state.TrainState, batch, cfg: Config, dropout_rng):
     _, labels = batch
 
@@ -207,7 +207,7 @@ def eval(state, eval_loader, cfg):
     batch_acc = []
     
     # with out static_argnames, error: https://jax.readthedocs.io/en/latest/errors.html#jax.errors.ConcretizationTypeError
-    infer_fn = jax.jit(GPT(cfg).apply, static_argnames='training')  # 17s to 1.62s
+    infer_fn = jax.jit(GPT(cfg).apply, static_argnames='training')  # 17s to 1.62s at gpt-nano setup
     
     for x, y in eval_loader:
         logits = infer_fn(state.params, x, training=False)
