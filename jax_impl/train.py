@@ -229,7 +229,7 @@ def eval(state, eval_loader, cfg):
 # q(x) = softmax(logits) = exp(x) / sum(exp(logits))
 # let i = correct index
 # -log(q(i)) = -log(exp(i) / sum(exp(logits)))
-#            = sum(exp(logits)) - i # this is how optax implement cross_entropy loss
+#            = log(sum(exp(logits))) - i # this is how optax implement cross_entropy loss
 # https://github.com/deepmind/optax/blob/master/optax/_src/loss.py#L175#L207
 #
 # normalization of logits for correct loss computation:
